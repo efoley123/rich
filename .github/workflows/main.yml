@@ -1,0 +1,111 @@
+name: Automated Test Generation Pipeline
+on:
+ push:
+   branches:
+     - main
+     - master
+     - "feature/*"
+     - eleanor-br
+     
+   paths:
+     - '**.py'
+     - '**.js'
+     - '**.ts'
+     - '**.java'
+     - '**.cpp'
+     - '**.cs'
+     - '**.go'
+
+jobs:
+ generate-tests:
+   runs-on: ubuntu-latest
+   environment: testgeneration
+   permissions:
+     contents: write
+     pull-requests: write
+   steps:
+     - uses: actions/checkout@v4
+       with:
+         fetch-depth: 2  # Need at least 2 commits for comparison
+         token: ${{ secrets.PAT_TOKEN }}
+     - name: Set up Python
+       uses: actions/setup-python@v4
+       with:
+         python-version: '3.8'
+     - name: Install dependencies
+       run: |
+         python -m pip install --upgrade pip
+         pip install requests pytest
+         pip install coverage
+     - name: Create tests directory
+       run: mkdir -p generated_tests
+     - name: Detect changed files
+       id: changed-files
+       run: |
+         changed_files=$(git diff --name-only HEAD^ HEAD | grep -E '\.(py|js|ts|java|cpp|cs|go)$' || true)
+         if [ -n "$changed_files" ]; then
+           changed_files_sanitized=$(echo "$changed_files" | tr '\n' ' ')
+           echo "CHANGED_FILES=$changed_files_sanitized" >> $GITHUB_ENV
+           echo "Found changed files: $changed_files_sanitized"
+         else
+           echo "No relevant source files changed"
+           exit 0
+         fi
+     - name: Run test generation script
+       if: env.CHANGED_FILES != ''
+       env:
+         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+         OPENAI_MODEL: "gpt-4-turbo-preview"  # Set default model
+         OPENAI_MAX_TOKENS: "4000"  # Set default max tokens
+       run: |
+         echo "Generating tests for: ${{ env.CHANGED_FILES }}"
+         python generate_tests.py "${{ env.CHANGED_FILES }}"
+     - name: Create unique branch name
+       if: env.CHANGED_FILES != ''
+       run: |
+         branch_name="test-gen-$(date +%Y%m%d-%H%M%S)"
+         echo "BRANCH_NAME=$branch_name" >> $GITHUB_ENV
+     - name: Configure Git
+       if: env.CHANGED_FILES != ''
+       run: |
+         git config --global user.name "GitHub Actions Bot"
+         git config --global user.email "github-actions[bot]@users.noreply.github.com"
+     - name: Check for changes before commit
+       if: env.CHANGED_FILES != ''
+       run: |
+         git status
+         git diff --name-only
+     - name: Commit and push changes
+       if: env.CHANGED_FILES != ''
+       env:
+         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+       run: |
+         if [ -n "$(git status --porcelain)" ]; then
+           git checkout -b ${{ env.BRANCH_NAME }}
+           git add generated_tests/
+           git commit -m "Add generated test cases for recent changes"
+           git push origin ${{ env.BRANCH_NAME }}
+           echo "CHANGES_PUSHED=1" >> $GITHUB_ENV
+         else
+           echo "No changes to commit"
+         fi
+     - name: Create Pull Request
+       if: env.CHANGES_PUSHED == '1'
+       uses: repo-sync/pull-request@v2
+       with:
+         github_token: ${{ secrets.PAT_TOKEN }}
+         pr_title: ":sparkles: New Test Cases Generated"
+         pr_body: |
+           ## :robot_face: Automated Test Generation
+           Generated test cases for the following files:
+           ```
+           ${{ env.CHANGED_FILES }}
+           ```
+           Please review these generated tests for:
+           - Correctness
+           - Coverage
+           - Edge cases
+           - Error handling
+           Generated using OpenAI GPT-4
+         destination_branch: "master"
+         source_branch: ${{ env.BRANCH_NAME }}
