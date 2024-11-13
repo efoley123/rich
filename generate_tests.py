@@ -544,7 +544,7 @@ class TestGenerator:
               
               if prompt:
                   
-                  test_cases = self.call_openai_api(prompt)
+                  #test_cases = self.call_openai_api(prompt)
                   logging.info(prompt+ "\n\n\n")
                   logging.info("this is test_cases result"+ test_cases)
                   if test_cases:
