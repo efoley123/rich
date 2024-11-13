@@ -212,8 +212,9 @@ class TestGenerator:
                 calculator_line = match.group(0)
                 coverageRunResult = calculator_line
                 match = re.search(r"%\s+(.*)", calculator_line)
-                coverageRunResult = match.group(0)
-                print(calculator_line)
+                if match:
+                    coverageRunResult = match.group(0)
+                    print(calculator_line)
 
             else:
                 print("Line for 'calculator.py' not found.")
